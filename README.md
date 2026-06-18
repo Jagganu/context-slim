@@ -1,14 +1,11 @@
 # context-slim
 
-Universal CLI tool that reduces AI token usage by truncating large outputs, compacting old conversation turns, and piping any command output through a token budget.
+Universal CLI tool that reduces AI token usage — truncates large outputs, compacts old conversation turns, pipes any command through a token budget.
 
 ## Quick start
 
 ```bash
-# Install globally
 npm install -g context-slim
-
-# Or run directly
 npx context-slim
 ```
 
@@ -19,18 +16,16 @@ slim capture  --tool-name <name> --tool-input <json> --tool-result <json>
 slim compact   ✂️  Compress old conversation turns (reads JSON from stdin)
 slim pipe      ✂️  Truncate any command output (reads raw text from stdin)
 slim status    📊  Print turn log summary (also cleans old turns)
+slim bench     📈  Run token-saving benchmark
 ```
 
 ### Pipe mode
 
 ```bash
-# Truncate any command output to SLIM_PREVIEW_MAX (default 600) chars
 cat huge_file.js | slim pipe
 npm test | slim pipe
-ls -R | slim
+ls -R | slim          # auto-detects piped stdin
 ```
-
-If no subcommand is given and stdin is a pipe, pipe mode activates automatically.
 
 ### Capture mode
 
@@ -45,13 +40,37 @@ slim capture \
 
 ### Compact mode
 
-Replaces old conversation turns with a summary:
+Replaces old conversation turns with a summary. Keeps last 3 verbatim.
 
 ```bash
 echo '[...conversation turns...]' | slim compact
 ```
 
-Keeps the last `SLIM_VERBATIM_KEEP` (default 3) turns intact.
+## Benchmark
+
+```
+$ slim bench
+  Read file (500 lines)        Before: 3750  After: 38    Saved: 3712
+  Bash command (200 lines)     Before: 500   After: 38    Saved: 462
+  Grep search (50 matches)     Before: 250   After: 13    Saved: 237
+  Compact 10 turns → summary   Before: 2500  After: 8     Saved: 2492
+  ─────────────────────────────────────────────────────────────────
+  Total:                       23,250 → 338 tokens  (99% reduction)
+```
+
+## Test suite
+
+```
+$ node scripts/test.js
+  11 passed, 0 failed, 11 total
+
+  ✓ status on empty log          ✓ compact passthrough (2 turns)
+  ✓ unknown subcommand usage     ✓ compact invalid JSON passthrough
+  ✓ pipe passthrough (short)     ✓ capture logs a turn
+  ✓ pipe truncation (long)       ✓ --hook backward compat
+  ✓ compact 6 turns to 4         ✓ auto-pipe from stdin
+                                 ✓ bench runs without error
+```
 
 ## Env vars
 
@@ -63,22 +82,23 @@ Keeps the last `SLIM_VERBATIM_KEEP` (default 3) turns intact.
 
 ## Claude Code integration
 
-context-slim started as a Claude Code plugin and the adapter files remain:
+Adapter files for Claude Code plugin remain:
 
 ```
 .claude-plugin/plugin.json   # Plugin manifest
-hooks/hooks.json             # Auto-firing hooks
+hooks/hooks.json             # Auto-firing hooks (PostToolUse, PreCompact)
 commands/slim.md             # /slim command
 ```
 
-Install by cloning into your Claude Code plugins directory.
+Clone into your Claude Code plugins directory.
 
 ## Files
 
 ```
 .
 ├── package.json              # npm package manifest
-├── scripts/slim.js           # All logic (~170 lines, zero deps)
+├── scripts/slim.js           # All logic (~200 lines, zero deps)
+├── scripts/test.js           # Test suite (11 tests)
 ├── .claude-plugin/plugin.json
 ├── hooks/hooks.json
 └── commands/slim.md

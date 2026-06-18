@@ -152,12 +152,44 @@ function handlePipe() {
   process.stdout.write(raw.slice(0, PREVIEW_MAX) + '\n[... truncated ' + (raw.length - PREVIEW_MAX) + ' chars by context-slim]');
 }
 
+function handleBench() {
+  var results = [];
+  function sim(name, beforeChars, afterChars) {
+    var before = Math.ceil(beforeChars / 4);
+    var after = Math.ceil(afterChars / 4);
+    results.push({ name: name, beforeTokens: before, afterTokens: after, saved: before - after });
+  }
+  // Simulate 5 Read calls with ~500-line files (~15K tokens each)
+  for (var i = 0; i < 5; i++) { sim('Read file ' + (i+1) + ' (500 lines)', 15000, 150); }
+  // Simulate 3 Bash calls with ~200 lines output (~2K tokens each)
+  for (var i = 0; i < 3; i++) { sim('Bash command ' + (i+1) + ' (200 lines)', 2000, 150); }
+  // Simulate 2 Grep calls with ~50 matches (~1K tokens each)
+  for (var i = 0; i < 2; i++) { sim('Grep search ' + (i+1) + ' (50 matches)', 1000, 50); }
+  // Simulate conversation compaction
+  sim('Compact 10 turns → summary', 10000, 30);
+
+  var totalBefore = 0, totalAfter = 0, totalSaved = 0;
+  results.forEach(function(r) { totalBefore += r.beforeTokens; totalAfter += r.afterTokens; totalSaved += r.saved; });
+
+  console.log('=== context-slim benchmark ===\n');
+  results.forEach(function(r) {
+    console.log('  ' + r.name);
+    console.log('    Before: ' + r.beforeTokens + ' tokens  After: ' + r.afterTokens + ' tokens  Saved: ' + r.saved + ' tokens');
+  });
+  console.log('  ─────────────────────────────────────────');
+  console.log('  Total before: ' + totalBefore + ' tokens');
+  console.log('  Total after:  ' + totalAfter + ' tokens');
+  console.log('  Total saved:  ' + totalSaved + ' tokens (' + (totalBefore ? Math.round(totalSaved / totalBefore * 100) : 0) + '% reduction)');
+  console.log('  (Based on ~4 chars/token heuristic)');
+}
+
 function printUsage() {
-  console.error('Usage: slim <capture|compact|pipe|status> [options]');
+  console.error('Usage: slim <capture|compact|pipe|status|bench> [options]');
   console.error('  capture  --tool-name <name> --tool-input <json> --tool-result <json>');
   console.error('  compact   Read conversation JSON from stdin, compact old turns');
   console.error('  pipe      Read raw text from stdin, truncate to SLIM_PREVIEW_MAX chars');
   console.error('  status    Print turn log summary');
+  console.error('  bench     Run token-saving benchmark');
   console.error('Env: SLIM_DATA_DIR, SLIM_PREVIEW_MAX, SLIM_VERBATIM_KEEP');
 }
 
@@ -178,6 +210,7 @@ switch (cmd) {
   case 'compact': handleCompact(); break;
   case 'pipe': handlePipe(); break;
   case 'status': handleStatus(); break;
+  case 'bench': handleBench(); break;
   default:
     if (cmd === undefined && !process.stdin.isTTY) { handlePipe(); break; }
     printUsage();
