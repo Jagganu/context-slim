@@ -56,19 +56,19 @@ function truncateToolOutput(toolName, raw) {
   switch (toolName) {
     case 'Read':
       if (raw.content && raw.content.length > PREVIEW_MAX)
-        return { toolName: 'Read', updatedToolOutput: Object.assign({}, raw, { content: raw.content.slice(0, PREVIEW_MAX) + '\n[truncated by context-slim]' }) };
+        return raw.content.slice(0, PREVIEW_MAX) + '\n[truncated by context-slim]';
       break;
     case 'Bash':
       if (raw.stdout && raw.stdout.length > PREVIEW_MAX)
-        return { toolName: 'Bash', updatedToolOutput: Object.assign({}, raw, { stdout: raw.stdout.slice(0, PREVIEW_MAX) + '\n[truncated by context-slim]' }) };
+        return raw.stdout.slice(0, PREVIEW_MAX) + '\n[truncated by context-slim]';
       break;
     case 'Grep':
       if (raw.results && raw.results.length > 5)
-        return { toolName: 'Grep', updatedToolOutput: Object.assign({}, raw, { results: raw.results.slice(0, 5), truncated: true }) };
+        return JSON.stringify(raw.results.slice(0, 5)) + '\n[truncated: showing 5 of ' + raw.results.length + ' matches]';
       break;
     case 'WebFetch':
       if (raw.data && raw.data.length > PREVIEW_MAX)
-        return { toolName: 'WebFetch', updatedToolOutput: Object.assign({}, raw, { data: raw.data.slice(0, PREVIEW_MAX) + '\n[truncated]' }) };
+        return raw.data.slice(0, PREVIEW_MAX) + '\n[truncated]';
       break;
   }
   return null;
@@ -101,12 +101,33 @@ function handleCapture(argStart) {
     result: safeStr(result, 200),
     summary: summarizeToolCall(toolName, input, result)
   });
-  var mod = truncateToolOutput(toolName, result);
-  if (mod) process.stdout.write(JSON.stringify(mod));
+  var truncated = truncateToolOutput(toolName, result);
+  if (truncated) {
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        updatedToolOutput: truncated
+      }
+    }));
+  }
 }
 
 function readStdin() {
-  return fs.readFileSync(0, 'utf8');
+  // fs.readFileSync(0) throws EAGAIN on Linux once process.stdin is touched
+  // (e.g. by the isTTY check). Read in chunks instead.
+  var fd = 0, chunks = [], buf = Buffer.alloc(65536);
+  while (true) {
+    var bytesRead;
+    try { bytesRead = fs.readSync(fd, buf, 0, buf.length, null); }
+    catch (e) {
+      if (e.code === 'EAGAIN') continue;
+      if (e.code === 'EOF') break;
+      throw e;
+    }
+    if (bytesRead === 0) break;
+    chunks.push(Buffer.from(buf.slice(0, bytesRead)));
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 function handleCompact() {
@@ -176,7 +197,7 @@ function handleProof() {
     var label = (t[0] + ' ' + t[1] + '                    ').slice(0, 24);
     lines.push('  ' + (i+1) + '     | ' + label + ' | ' + String(raw).padStart(7) + ' | ' + String(cap).padStart(11) + ' | ' + String(com).padStart(11));
   });
-  console.log('=== context-slim: empirical token savings ===');
+  console.log('=== context-slim: estimated token savings (simulated session) ===');
   console.log('Session: 10 tool calls in a single conversation\n');
   console.log('  Turn  | Tool/File               | Raw tok | Capture tok | Compact tok');
   console.log('  ------+--------------------------+---------+-------------+------------');

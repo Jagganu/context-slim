@@ -5,8 +5,15 @@ Universal CLI tool that reduces AI token usage — truncates large outputs, comp
 ## Quick start
 
 ```bash
-npm install -g context-slim
-npx context-slim
+git clone https://github.com/Jagganu/context-slim.git
+cd context-slim
+node scripts/slim.js status
+```
+
+Or install globally after clone:
+```bash
+npm install -g .
+slim status
 ```
 
 ## CLI
@@ -17,6 +24,7 @@ slim compact   ✂️  Compress old conversation turns (reads JSON from stdin)
 slim pipe      ✂️  Truncate any command output (reads raw text from stdin)
 slim status    📊  Print turn log summary (also cleans old turns)
 slim bench     📈  Run token-saving benchmark
+slim proof     📊  Show estimated token savings for a typical session
 ```
 
 ### Pipe mode
@@ -46,9 +54,9 @@ Replaces old conversation turns with a summary. Keeps last 3 verbatim.
 echo '[...conversation turns...]' | slim compact
 ```
 
-## Proof: empirical token savings
+## Estimated token savings
 
-Run `slim proof` — simulates a real 10-call AI coding session and measures tokens at each stage:
+Run `slim proof` — simulates a typical 10-call AI coding session and estimates token reduction at each stage (based on ~4 chars/token):
 
 ```
 $ slim proof
