@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/slim.js",
+              "--hook",
+              "capture",
+              "--tool-name",
+              "${toolName}",
+              "--tool-input",
+              "${toolInput}",
+              "--tool-result",
+              "${toolResult}"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/slim.js",
+              "--hook",
+              "compact"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
