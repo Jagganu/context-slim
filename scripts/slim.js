@@ -2,10 +2,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERBATIM_KEEP = 3;
-const PREVIEW_MAX = 600;
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
-const DATA_DIR = path.join(PLUGIN_ROOT, 'data');
+// Config from env vars
+const VERBATIM_KEEP = parseInt(process.env.SLIM_VERBATIM_KEEP, 10) || 3;
+const PREVIEW_MAX = parseInt(process.env.SLIM_PREVIEW_MAX, 10) || 600;
+const DATA_DIR = process.env.SLIM_DATA_DIR || path.join(
+  process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..'), 'data');
 const LOG_FILE = path.join(DATA_DIR, 'turns.jsonl');
 
 function ensureDataDir() {
@@ -73,9 +74,9 @@ function truncateToolOutput(toolName, raw) {
   return null;
 }
 
-function parseArgs() {
+function parseArgs(start) {
   const args = {};
-  for (let i = 2; i < process.argv.length; i++) {
+  for (let i = start; i < process.argv.length; i++) {
     const a = process.argv[i];
     if (a.startsWith('--')) {
       const key = a.slice(2);
@@ -87,8 +88,8 @@ function parseArgs() {
   return args;
 }
 
-function handleCapture() {
-  const args = parseArgs();
+function handleCapture(argStart) {
+  const args = parseArgs(argStart);
   const toolName = args['tool-name'];
   var input = null, result = null;
   try { input = JSON.parse(args['tool-input'] || '{}'); } catch (_) {}
@@ -127,24 +128,58 @@ function handleCompact() {
   }
 }
 
-function handleSlim() {
+function handleStatus() {
   var turns = loadTurns();
   if (turns.length === 0) { console.log('[context-slim] No tool calls recorded yet.'); return; }
   var counts = {};
   turns.forEach(function(t) { counts[t.tool] = (counts[t.tool] || 0) + 1; });
-  console.log('=== context-slim: ' + turns.length + ' turns ===');
+  console.log('=== context-slim: ' + turns.length + ' turn' + (turns.length === 1 ? '' : 's') + ' ===');
   console.log('Tools: ' + Object.keys(counts).map(function(k) { return k + '(' + counts[k] + ')'; }).join(', '));
+  console.log('Config: SLIM_DATA_DIR=' + DATA_DIR + ' SLIM_PREVIEW_MAX=' + PREVIEW_MAX + ' SLIM_VERBATIM_KEEP=' + VERBATIM_KEEP);
   turns.forEach(function(t) { console.log('  [' + (t.ts ? t.ts.slice(0, 19) : '?') + '] ' + (t.summary || t.tool)); });
   var oldCount = Math.max(0, turns.length - 1);
   console.log('');
-  console.log('Slimmed ' + oldCount + ' turns, kept 1 verbatim.');
+  console.log('Slimmed ' + oldCount + ' turn' + (oldCount === 1 ? '' : 's') + ', kept 1 verbatim.');
   truncateLog(1);
 }
 
-var hook = parseArgs()['hook'] || process.argv[2];
-switch (hook) {
-  case 'capture': handleCapture(); break;
+function handlePipe() {
+  var raw = readStdin();
+  if (raw.length <= PREVIEW_MAX) {
+    process.stdout.write(raw);
+    return;
+  }
+  process.stdout.write(raw.slice(0, PREVIEW_MAX) + '\n[... truncated ' + (raw.length - PREVIEW_MAX) + ' chars by context-slim]');
+}
+
+function printUsage() {
+  console.error('Usage: slim <capture|compact|pipe|status> [options]');
+  console.error('  capture  --tool-name <name> --tool-input <json> --tool-result <json>');
+  console.error('  compact   Read conversation JSON from stdin, compact old turns');
+  console.error('  pipe      Read raw text from stdin, truncate to SLIM_PREVIEW_MAX chars');
+  console.error('  status    Print turn log summary');
+  console.error('Env: SLIM_DATA_DIR, SLIM_PREVIEW_MAX, SLIM_VERBATIM_KEEP');
+}
+
+// Dispatch
+var cmd, argStart;
+if (process.argv[2] === '--hook') {
+  cmd = process.argv[3];
+  argStart = 4;
+} else {
+  cmd = process.argv[2];
+  argStart = 3;
+}
+
+if (cmd === 'slim') cmd = 'status';
+
+switch (cmd) {
+  case 'capture': handleCapture(argStart); break;
   case 'compact': handleCompact(); break;
-  case 'slim': handleSlim(); break;
-  default: console.error('context-slim: unknown hook ' + hook); process.exit(1);
+  case 'pipe': handlePipe(); break;
+  case 'status': handleStatus(); break;
+  default:
+    if (cmd === undefined && !process.stdin.isTTY) { handlePipe(); break; }
+    printUsage();
+    process.exit(1);
 }

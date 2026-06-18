@@ -1,0 +1,19 @@
+{
+  "name": "context-slim",
+  "version": "1.0.0",
+  "description": "Universal CLI tool to reduce AI token usage — truncate large outputs, compact conversation history, pipe mode",
+  "bin": {
+    "slim": "./scripts/slim.js"
+  },
+  "scripts": {
+    "slim": "node scripts/slim.js"
+  },
+  "files": [
+    "scripts/",
+    ".claude-plugin/",
+    "hooks/",
+    "commands/"
+  ],
+  "keywords": ["context", "token", "slim", "claude", "ai", "token-saver"],
+  "license": "MIT"
+}
