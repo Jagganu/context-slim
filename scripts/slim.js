@@ -90,16 +90,30 @@ function parseArgs(start) {
 
 function handleCapture(argStart) {
   const args = parseArgs(argStart);
-  const toolName = args['tool-name'];
+  var toolName = args['tool-name'];
   var input = null, result = null;
-  // '-' means "read tool-result from stdin" — avoids OS ARG_MAX crashes
-  // on large tool outputs (big file Reads, verbose Bash logs, etc.)
-  var resultRaw = args['tool-result'];
-  if (resultRaw === '-' || resultRaw === true) {
-    try { resultRaw = readStdin(); } catch (_) { resultRaw = '{}'; }
+
+  if (toolName) {
+    // Manual/legacy CLI testing path: --tool-name, --tool-input, --tool-result.
+    // '-' reads tool-result from stdin for inputs too big for argv.
+    var resultRaw = args['tool-result'];
+    if (resultRaw === '-' || resultRaw === true) {
+      try { resultRaw = readStdin(); } catch (_) { resultRaw = '{}'; }
+    }
+    try { input = JSON.parse(args['tool-input'] || '{}'); } catch (_) {}
+    try { result = JSON.parse(resultRaw || '{}'); } catch (_) {}
+  } else {
+    // Real Claude Code hook contract: the whole event arrives as one JSON
+    // blob on stdin — { hook_event_name, tool_name, tool_input, tool_response }.
+    // No argv/shell involved, so no ARG_MAX limit and no quoting risk.
+    var raw = '{}';
+    try { raw = readStdin(); } catch (_) {}
+    var event = {};
+    try { event = JSON.parse(raw || '{}'); } catch (_) {}
+    toolName = event.tool_name;
+    input = event.tool_input || null;
+    result = event.tool_response || null;
   }
-  try { input = JSON.parse(args['tool-input'] || '{}'); } catch (_) {}
-  try { result = JSON.parse(resultRaw || '{}'); } catch (_) {}
   appendTurn({
     ts: new Date().toISOString(),
     tool: toolName,
