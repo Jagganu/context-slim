@@ -5,13 +5,14 @@ Universal CLI tool that reduces AI token usage — truncates large outputs, comp
 ## Quick start
 
 ```bash
-git clone https://github.com/Jagganu/context-slim.git
-cd context-slim
-node scripts/slim.js status
+npm install -g context-slim
+slim status
 ```
 
-Or install globally after clone:
+Or from source:
 ```bash
+git clone https://github.com/Jagganu/context-slim.git
+cd context-slim
 npm install -g .
 slim status
 ```
