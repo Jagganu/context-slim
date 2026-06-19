@@ -1,6 +1,5 @@
 ---
 name: slim
-description: Emergency manual context trim. Compresses all tool call history into a short summary, keeping only the last turn verbatim.
 ---
 
 1. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/slim.js" --hook slim` via Bash

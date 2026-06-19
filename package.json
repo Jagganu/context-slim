@@ -1,7 +1,6 @@
 {
   "name": "context-slim",
   "version": "1.1.0",
-  "description": "Universal CLI tool to reduce AI token usage — truncate large outputs, compact conversation history, pipe mode",
   "bin": {
     "slim": "scripts/slim.js"
   },
