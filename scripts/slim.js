@@ -92,8 +92,14 @@ function handleCapture(argStart) {
   const args = parseArgs(argStart);
   const toolName = args['tool-name'];
   var input = null, result = null;
+  // '-' means "read tool-result from stdin" — avoids OS ARG_MAX crashes
+  // on large tool outputs (big file Reads, verbose Bash logs, etc.)
+  var resultRaw = args['tool-result'];
+  if (resultRaw === '-' || resultRaw === true) {
+    try { resultRaw = readStdin(); } catch (_) { resultRaw = '{}'; }
+  }
   try { input = JSON.parse(args['tool-input'] || '{}'); } catch (_) {}
-  try { result = JSON.parse(args['tool-result'] || '{}'); } catch (_) {}
+  try { result = JSON.parse(resultRaw || '{}'); } catch (_) {}
   appendTurn({
     ts: new Date().toISOString(),
     tool: toolName,

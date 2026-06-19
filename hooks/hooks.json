@@ -5,17 +5,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
+            "command": "sh",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/slim.js",
-              "--hook",
-              "capture",
-              "--tool-name",
-              "${toolName}",
-              "--tool-input",
-              "${toolInput}",
-              "--tool-result",
-              "${toolResult}"
+              "-c",
+              "echo '${toolResult}' | node \"${CLAUDE_PLUGIN_ROOT}/scripts/slim.js\" --hook capture --tool-name '${toolName}' --tool-input '${toolInput}' --tool-result -"
             ],
             "timeout": 10
           }
