@@ -1,44 +1,90 @@
 # context-slim
 
-Universal CLI tool that reduces AI token usage — truncates large outputs, compacts old conversation turns, pipes any command through a token budget.
+A small, dependency-free CLI that truncates large command/tool output to a
+token budget, plus an optional Claude Code plugin that wires the same
+truncation into the `PostToolUse` hook.
 
 ## Quick start
 
-```bash
-npm install -g context-slim
-slim status
-```
+Not yet published to npm — install from source:
 
-Or from source:
 ```bash
 git clone https://github.com/Jagganu/context-slim.git
 cd context-slim
-npm install -g .
-slim status
+npm link        # makes the `slim` command available globally
 ```
+
+Once published, `npm install -g context-slim` will work too.
 
 ## CLI
 
 ```
-slim capture  --tool-name <name> --tool-input <json> --tool-result <json>
-slim compact   ✂️  Compress old conversation turns (reads JSON from stdin)
-slim pipe      ✂️  Truncate any command output (reads raw text from stdin)
-slim status    📊  Print turn log summary (also cleans old turns)
-slim bench     📈  Run token-saving benchmark
-slim proof     📊  Show estimated token savings for a typical session
+slim capture   PostToolUse hook entrypoint (see "Claude Code integration" below)
+slim backup    PreCompact hook entrypoint (see "Claude Code integration" below)
+slim compact   Compress old conversation turns (reads a JSON array from stdin)
+slim pipe      Truncate any command's output (reads raw text from stdin)
+slim status    Print a summary of the local capture log, then prune it
+slim bench     Run an illustrative token-saving estimate
 ```
 
 ### Pipe mode
 
+The one part of this tool that's fully general-purpose — works with any
+command, no Claude Code involved:
+
 ```bash
 cat huge_file.js | slim pipe
 npm test | slim pipe
-ls -R | slim          # auto-detects piped stdin
+ls -R | slim          # no subcommand + piped stdin = same as `slim pipe`
 ```
 
-### Capture mode
+## Claude Code integration
 
-Records tool calls and truncates large Read/Bash/Grep/WebFetch responses:
+```
+.claude-plugin/plugin.json   # Plugin manifest
+hooks/hooks.json             # PostToolUse + PreCompact hook registration
+commands/slim.md             # /slim command
+```
+
+Clone into your Claude Code plugins directory to enable it.
+
+**What it actually does, precisely:**
+
+- **`PostToolUse` → `slim capture`**: Claude Code sends `{tool_name,
+  tool_input, tool_response}` as JSON on stdin after `Bash`, `Read`, `Grep`,
+  `Glob`, `WebFetch`, or `WebSearch` calls (see the `matcher` in
+  `hooks/hooks.json`). If the result is longer than `SLIM_PREVIEW_MAX`
+  (default 600 chars), the hook returns
+  `{hookSpecificOutput: {hookEventName: "PostToolUse", updatedToolOutput:
+  "<truncated text>"}}`, and Claude Code substitutes that truncated string
+  for the tool result in the live conversation.
+  - **Requires Claude Code v2.1.121 or later.** On older versions,
+    `updatedToolOutput` is only honored for MCP tools, so this hook becomes a
+    silent no-op for built-in tools like `Bash` and `Read` — it still logs
+    locally, it just won't shrink what Claude sees.
+  - Claude Code doesn't publish a fixed schema for `tool_response` per tool,
+    so the truncator is schema-agnostic: it prefers an obvious text field
+    (`content`, `stdout`, an MCP-style `content` array) if present, and
+    falls back to the full JSON otherwise. Nothing is silently skipped just
+    because the shape doesn't match a guess.
+  - Every captured call (truncated or not) is also logged locally to
+    `data/turns.jsonl`, regardless of Claude Code version.
+
+- **`PreCompact` → `slim backup`**: `PreCompact` can only block or allow
+  compaction — there is no field for injecting custom replacement content
+  into Claude Code's own compaction. This hook does **not** attempt to
+  compact the live conversation. It snapshots context-slim's own local
+  `data/turns.jsonl` to `data/backups/<timestamp>-<trigger>.jsonl` before
+  anything clears it, so your local capture history survives a compaction
+  event. That's the full scope of what it does.
+
+- **`/slim` command**: reads back the local capture log and prunes it to the
+  most recent entry. This is a bookkeeping tool for *context-slim's own log*
+  — it has no effect on Claude Code's actual context window. There is no
+  supported mechanism for a plugin to retroactively shrink content Claude
+  Code has already sent to the model.
+
+### Manual capture (for testing)
 
 ```bash
 slim capture \
@@ -47,69 +93,38 @@ slim capture \
   --tool-result '{"content":"lots of code..."}'
 ```
 
-### Compact mode
+### Compact mode (standalone)
 
-Replaces old conversation turns with a summary. Keeps last 3 verbatim.
+A generic helper, independent of Claude Code: given a JSON array of
+`{role, content}` turns on stdin, replaces everything but the last
+`SLIM_VERBATIM_KEEP` turns with a one-line placeholder. Useful if you're
+piping your own conversation logs through something and want to budget them
+yourself — nothing in this repo currently calls it automatically.
 
 ```bash
 echo '[...conversation turns...]' | slim compact
 ```
 
-## Estimated token savings
-
-Run `slim proof` — simulates a typical 10-call AI coding session and estimates token reduction at each stage (based on ~4 chars/token):
-
-```
-$ slim proof
-  Turn  | Tool/File               | Raw tok | Capture tok | Compact tok
-  ------+--------------------------+---------+-------------+------------
-  1     | Read src/app.js (600 l) |    2000 |         163 |           8
-  2     | Read src/utils.js (900) |    3000 |         163 |           8
-  3     | Bash npm test (400 lin) |    1250 |         163 |           8
-  4     | Grep TODO search (60 m) |     750 |          30 |           8
-  5     | Read Header.jsx (450 l) |    1500 |         163 |           8
-  6     | Read styles.css (1100 ) |    3750 |         163 |           8
-  7     | Bash node build.js (550 |    1750 |         163 |           8
-  8     | Grep export search (40) |     500 |          30 |          30
-  9     | Read README.md (300 li) |    1000 |         163 |         163
-  10    | Bash git status (250 l) |     750 |         163 |         163
-  ------+--------------------------+---------+-------------+------------
-  Total |                          |   16250 |        1364 |         412
-
-Stage 1: Capture mode truncates tool output to 600 chars
-  16,250 → 1,364 tokens  (92% reduction)
-Stage 2: Compact mode replaces old turns with summaries
-  1,364 → 412 tokens  (70% from capture, 97% from original)
-Total saved: 15,838 tokens per session (97%)
-
-At $0.15/M input tokens: $0.0024 → $0.0001 per session
-Over 1000 sessions: $2.38 saved
-```
-
-Per-turn breakdown of what capture mode saves on a single large read:
-
-| Tool call | Raw | Slimmed | Saved |
-|-----------|-----|---------|-------|
-| Read a 900-line file | 3,000 tok | 163 tok | **2,837 tok** |
-| Read a 1100-line CSS | 3,750 tok | 163 tok | **3,587 tok** |
-| Bash with 400-line output | 1,250 tok | 163 tok | **1,087 tok** |
-| Grep with 60 matches | 750 tok | 30 tok | **720 tok** |
-
 ## Test suite
 
 ```
-$ node scripts/test.js
-  11 passed, 0 failed, 11 total
-
-  ✓ status on empty log          ✓ compact passthrough (2 turns)
-  ✓ unknown subcommand usage     ✓ compact invalid JSON passthrough
-  ✓ pipe passthrough (short)     ✓ capture logs a turn
-  ✓ pipe truncation (long)       ✓ --hook backward compat
-  ✓ compact 6 turns to 4         ✓ auto-pipe from stdin
-                                 ✓ bench runs without error
+$ npm test
+  14 passed, 0 failed, 14 total
 ```
 
-## Benchmark
+Covers: pipe truncation, compact summarization, the legacy flag-based
+capture path, the real stdin-based capture path Claude Code actually uses
+(including truncation output), and the PreCompact backup snapshot.
+
+## Illustrative benchmark
+
+`slim bench` and `slim proof` print **simulated** numbers from hardcoded
+example sizes (a hypothetical 500-line file read, a hypothetical 200-line
+Bash output, etc.) — they estimate what truncation *would* save on output of
+that size, using a ~4-chars/token heuristic. They are not measurements from
+a real session, and on Claude Code versions before v2.1.121 the live
+`PostToolUse` part of this doesn't apply at all (see above). Treat these as
+back-of-envelope sizing, not a benchmark of this tool in production.
 
 ```
 $ slim bench
@@ -125,33 +140,25 @@ $ slim bench
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SLIM_DATA_DIR` | `./data` | Turn log storage location |
+| `SLIM_DATA_DIR` | `./data` | Turn log + backup storage location |
 | `SLIM_PREVIEW_MAX` | `600` | Max chars before truncation |
-| `SLIM_VERBATIM_KEEP` | `3` | Conversation turns to keep verbatim |
-
-## Claude Code integration
-
-Adapter files for Claude Code plugin remain:
-
-```
-.claude-plugin/plugin.json   # Plugin manifest
-hooks/hooks.json             # Auto-firing hooks (PostToolUse, PreCompact)
-commands/slim.md             # /slim command
-```
-
-Clone into your Claude Code plugins directory.
+| `SLIM_VERBATIM_KEEP` | `3` | Turns kept verbatim by `slim compact` |
 
 ## Files
 
 ```
 .
 ├── package.json              # npm package manifest
-├── scripts/slim.js           # All logic (~200 lines, zero deps)
-├── scripts/test.js           # Test suite (11 tests)
+├── scripts/slim.js           # All logic, zero deps
+├── scripts/test.js           # Test suite (14 tests)
 ├── .claude-plugin/plugin.json
 ├── hooks/hooks.json
 └── commands/slim.md
 ```
+
+## Contributing
+
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

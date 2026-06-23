@@ -1,11 +1,13 @@
 {
   "name": "context-slim",
-  "version": "1.1.1",
+  "version": "1.2.1",
+  "description": "Truncate large CLI/Claude Code tool outputs and pipe any command through a token budget. Universal CLI tool, zero dependencies.",
   "bin": {
     "slim": "scripts/slim.js"
   },
   "scripts": {
-    "slim": "node scripts/slim.js"
+    "slim": "node scripts/slim.js",
+    "test": "node scripts/test.js"
   },
   "files": [
     "scripts/",
@@ -18,8 +20,21 @@
     "token",
     "slim",
     "claude",
+    "claude-code",
     "ai",
-    "token-saver"
+    "token-saver",
+    "cli"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jagganu/context-slim.git"
+  },
+  "homepage": "https://github.com/Jagganu/context-slim#readme",
+  "bugs": {
+    "url": "https://github.com/Jagganu/context-slim/issues"
+  },
+  "engines": {
+    "node": ">=14"
+  }
 }

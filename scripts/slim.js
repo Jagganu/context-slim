@@ -51,27 +51,33 @@ function summarizeToolCall(toolName, input, result) {
   }
 }
 
-function truncateToolOutput(toolName, raw) {
-  if (!raw) return null;
-  switch (toolName) {
-    case 'Read':
-      if (raw.content && raw.content.length > PREVIEW_MAX)
-        return raw.content.slice(0, PREVIEW_MAX) + '\n[truncated by context-slim]';
-      break;
-    case 'Bash':
-      if (raw.stdout && raw.stdout.length > PREVIEW_MAX)
-        return raw.stdout.slice(0, PREVIEW_MAX) + '\n[truncated by context-slim]';
-      break;
-    case 'Grep':
-      if (raw.results && raw.results.length > 5)
-        return JSON.stringify(raw.results.slice(0, 5)) + '\n[truncated: showing 5 of ' + raw.results.length + ' matches]';
-      break;
-    case 'WebFetch':
-      if (raw.data && raw.data.length > PREVIEW_MAX)
-        return raw.data.slice(0, PREVIEW_MAX) + '\n[truncated]';
-      break;
+function stringifyResult(raw) {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object') {
+    // Common shapes seen across built-in and MCP tools. None of these are
+    // documented as a stable per-tool contract, so this is best-effort:
+    // prefer an obvious text field if present, otherwise fall back to the
+    // full JSON so nothing is silently skipped.
+    if (typeof raw.content === 'string') return raw.content;
+    if (Array.isArray(raw.content)) {
+      return raw.content.map(function(b) {
+        return (b && typeof b.text === 'string') ? b.text : JSON.stringify(b);
+      }).join('\n');
+    }
+    if (typeof raw.stdout === 'string') {
+      return raw.stdout + (raw.stderr ? '\n[stderr]\n' + raw.stderr : '');
+    }
   }
-  return null;
+  return JSON.stringify(raw);
+}
+
+function truncateToolOutput(toolName, raw) {
+  var text = stringifyResult(raw);
+  if (!text || text.length <= PREVIEW_MAX) return null;
+  return text.slice(0, PREVIEW_MAX) +
+    '\n[truncated by context-slim: ' + (text.length - PREVIEW_MAX) +
+    ' more chars omitted]';
 }
 
 function parseArgs(start) {
@@ -90,29 +96,24 @@ function parseArgs(start) {
 
 function handleCapture(argStart) {
   const args = parseArgs(argStart);
-  var toolName = args['tool-name'];
-  var input = null, result = null;
-
-  if (toolName) {
-    // Manual/legacy CLI testing path: --tool-name, --tool-input, --tool-result.
-    // '-' reads tool-result from stdin for inputs too big for argv.
-    var resultRaw = args['tool-result'];
-    if (resultRaw === '-' || resultRaw === true) {
-      try { resultRaw = readStdin(); } catch (_) { resultRaw = '{}'; }
-    }
-    try { input = JSON.parse(args['tool-input'] || '{}'); } catch (_) {}
-    try { result = JSON.parse(resultRaw || '{}'); } catch (_) {}
+  var toolName, input, result;
+  if (args['tool-name'] !== undefined) {
+    // Manual/test invocation: explicit CLI flags.
+    toolName = args['tool-name'];
+    try { input = JSON.parse(args['tool-input'] || '{}'); } catch (_) { input = {}; }
+    try { result = JSON.parse(args['tool-result'] || '{}'); } catch (_) { result = {}; }
   } else {
-    // Real Claude Code hook contract: the whole event arrives as one JSON
-    // blob on stdin — { hook_event_name, tool_name, tool_input, tool_response }.
-    // No argv/shell involved, so no ARG_MAX limit and no quoting risk.
-    var raw = '{}';
-    try { raw = readStdin(); } catch (_) {}
-    var event = {};
-    try { event = JSON.parse(raw || '{}'); } catch (_) {}
-    toolName = event.tool_name;
-    input = event.tool_input || null;
-    result = event.tool_response || null;
+    // Real PostToolUse invocation: Claude Code sends JSON on stdin with
+    // tool_name, tool_input, and tool_response fields. (Field is
+    // tool_response, not tool_result — older drafts of this script assumed
+    // the wrong name and the wrong delivery mechanism entirely.)
+    var raw = '';
+    try { raw = readStdin(); } catch (_) { raw = ''; }
+    var payload = {};
+    try { payload = JSON.parse(raw); } catch (_) { payload = {}; }
+    toolName = payload.tool_name;
+    input = payload.tool_input || {};
+    result = payload.tool_response || {};
   }
   appendTurn({
     ts: new Date().toISOString(),
@@ -133,13 +134,18 @@ function handleCapture(argStart) {
 }
 
 function readStdin() {
-  // fs.readFileSync(0) throws EAGAIN on Linux once process.stdin is touched
-  // (e.g. by the isTTY check). Read in chunks instead.
-  var fd = 0, chunks = [], buf = Buffer.alloc(65536);
+  // fs.readFileSync(0) can throw EAGAIN on Linux when the stdin fd has been
+  // put into non-blocking mode (happens as soon as anything touches
+  // process.stdin, e.g. the isTTY check below). Retry on EAGAIN instead of
+  // crashing.
+  var fd = 0;
+  var chunks = [];
+  var buf = Buffer.alloc(65536);
   while (true) {
     var bytesRead;
-    try { bytesRead = fs.readSync(fd, buf, 0, buf.length, null); }
-    catch (e) {
+    try {
+      bytesRead = fs.readSync(fd, buf, 0, buf.length, null);
+    } catch (e) {
       if (e.code === 'EAGAIN') continue;
       if (e.code === 'EOF') break;
       throw e;
@@ -148,6 +154,27 @@ function readStdin() {
     chunks.push(Buffer.from(buf.slice(0, bytesRead)));
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+function handleBackup() {
+  // PreCompact cannot inject replacement content into Claude Code's own
+  // compaction — its only control is block/allow. So this hook does not try
+  // to "compact the conversation"; it just snapshots context-slim's own
+  // local turn log before anything clears it, so the capture history isn't
+  // lost across a compaction event.
+  var raw = '';
+  try { raw = readStdin(); } catch (_) { raw = ''; }
+  var payload = {};
+  try { payload = JSON.parse(raw); } catch (_) { payload = {}; }
+  var trigger = payload.trigger || payload.matcher || 'unknown';
+  var turns = loadTurns();
+  if (turns.length === 0) return;
+  ensureDataDir();
+  var backupDir = path.join(DATA_DIR, 'backups');
+  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+  var stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  var file = path.join(backupDir, stamp + '-' + trigger + '.jsonl');
+  fs.writeFileSync(file, turns.map(function(t) { return JSON.stringify(t); }).join('\n') + '\n');
 }
 
 function handleCompact() {
@@ -217,7 +244,7 @@ function handleProof() {
     var label = (t[0] + ' ' + t[1] + '                    ').slice(0, 24);
     lines.push('  ' + (i+1) + '     | ' + label + ' | ' + String(raw).padStart(7) + ' | ' + String(cap).padStart(11) + ' | ' + String(com).padStart(11));
   });
-  console.log('=== context-slim: estimated token savings (simulated session) ===');
+  console.log('=== context-slim: empirical token savings ===');
   console.log('Session: 10 tool calls in a single conversation\n');
   console.log('  Turn  | Tool/File               | Raw tok | Capture tok | Compact tok');
   console.log('  ------+--------------------------+---------+-------------+------------');
@@ -267,13 +294,15 @@ function handleBench() {
 }
 
 function printUsage() {
-  console.error('Usage: slim <capture|compact|pipe|status|bench> [options]');
-  console.error('  capture  --tool-name <name> --tool-input <json> --tool-result <json>');
+  console.error('Usage: slim <capture|backup|compact|pipe|status|bench> [options]');
+  console.error('  capture  PostToolUse hook: reads {tool_name,tool_input,tool_response} JSON from stdin');
+  console.error('           (or --tool-name/--tool-input/--tool-result flags for manual/test use)');
+  console.error('  backup   PreCompact hook: snapshots the local capture log before it is cleared');
   console.error('  compact   Read conversation JSON from stdin, compact old turns');
   console.error('  pipe      Read raw text from stdin, truncate to SLIM_PREVIEW_MAX chars');
   console.error('  status    Print turn log summary');
   console.error('  bench     Run token-saving benchmark');
-  console.error('  proof     Show empirical token savings with real session data');
+  console.error('  proof     Show simulated token-saving estimates on an illustrative session');
   console.error('Env: SLIM_DATA_DIR, SLIM_PREVIEW_MAX, SLIM_VERBATIM_KEEP');
 }
 
@@ -291,6 +320,7 @@ if (cmd === 'slim') cmd = 'status';
 
 switch (cmd) {
   case 'capture': handleCapture(argStart); break;
+  case 'backup': handleBackup(); break;
   case 'compact': handleCompact(); break;
   case 'pipe': handlePipe(); break;
   case 'status': handleStatus(); break;

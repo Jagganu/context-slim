@@ -1,11 +1,17 @@
 {
+  "description": "Truncates large tool outputs and backs up the capture log before compaction",
   "hooks": {
     "PostToolUse": [
       {
+        "matcher": "Bash|Read|Grep|Glob|WebFetch|WebSearch",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/slim.js\" --hook capture",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/slim.js",
+              "capture"
+            ],
             "timeout": 10
           }
         ]
@@ -16,7 +22,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/slim.js\" --hook compact",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/slim.js",
+              "backup"
+            ],
             "timeout": 10
           }
         ]

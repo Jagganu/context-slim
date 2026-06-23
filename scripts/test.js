@@ -32,6 +32,9 @@ test('compact 6 turns to 4', 'node -e "process.stdout.write(JSON.stringify([{rol
 test('compact passthrough (2 turns)', 'node -e "process.stdout.write(JSON.stringify([{role:\'user\',content:\'a\'},{role:\'assistant\',content:\'b\'}]))" | ' + SLIM + ' compact', function(o) { return !o.includes('slim:'); });
 test('compact invalid json passthrough', 'echo "not json" | ' + SLIM + ' compact', 'not json');
 test('capture logs a turn', SLIM + ' capture --tool-name Read --tool-input "{}" --tool-result "{}"', function() { return fs.existsSync(LOG); });
+test('capture via stdin (real hook path)', 'node -e "process.stdout.write(JSON.stringify({tool_name:\'Bash\',tool_input:{command:\'ls\'},tool_response:{stdout:\'short\'}}))" | ' + SLIM + ' capture', function() { return fs.existsSync(LOG) && fs.readFileSync(LOG,'utf8').includes('Bash'); });
+test('capture via stdin truncates large output', 'node -e "process.stdout.write(JSON.stringify({tool_name:\'Bash\',tool_input:{},tool_response:{stdout:\'A\'.repeat(2000)}}))" | ' + SLIM + ' capture', 'hookSpecificOutput');
+test('backup snapshots the log before compaction', SLIM + ' capture --tool-name Read --tool-input "{}" --tool-result "{}" && node -e "process.stdout.write(JSON.stringify({trigger:\'manual\'}))" | ' + SLIM + ' backup', function() { return fs.existsSync(path.join(ROOT, 'data', 'backups')); });
 test('--hook backward compat', SLIM + ' --hook status', '[context-slim]');
 test('auto-pipe when stdin piped', 'node -e "process.stdout.write(\'auto\')" | ' + SLIM, 'auto');
 test('bench runs without error', SLIM + ' bench', '=== context-slim benchmark ===');

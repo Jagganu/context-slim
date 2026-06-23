@@ -1,5 +1,6 @@
 {
   "name": "context-slim",
+  "description": "Auto-slims context window by summarizing old tool calls and truncating large outputs",
   "version": "1.0.0",
   "author": "context-slim team",
   "license": "MIT"
