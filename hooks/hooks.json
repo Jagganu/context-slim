@@ -1,5 +1,5 @@
 {
-  "description": "Truncates large tool outputs and backs up the capture log before compaction",
+
   "hooks": {
     "PostToolUse": [
       {

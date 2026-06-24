@@ -1,7 +1,7 @@
 {
   "name": "context-slim",
   "version": "1.2.1",
-  "description": "Truncate large CLI/Claude Code tool outputs and pipe any command through a token budget. Universal CLI tool, zero dependencies.",
+
   "bin": {
     "slim": "scripts/slim.js"
   },

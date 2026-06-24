@@ -1,6 +1,5 @@
 ---
 name: slim
-description: Show a summary of tool calls context-slim has recorded locally, and prune that local log. Does not shrink Claude Code's own conversation context.
 ---
 
 1. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/slim.js" status` via Bash
